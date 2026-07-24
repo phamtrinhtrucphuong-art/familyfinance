@@ -1,0 +1,178 @@
+import streamlit as st
+import sqlite3
+import pandas as pd
+from datetime import datetime
+
+# ---------------------------------------------------------
+# 1. KẾT NỐI VÀ TẠO CƠ SỞ DỮ LIỆU
+# ---------------------------------------------------------
+def init_db():
+    conn = sqlite3.connect('tai_chinh_gia_dinh.db')
+    c = conn.cursor()
+    # Bảng giao dịch hằng ngày
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS giao_dich (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ngay TEXT,
+            nguoi_thuc_hien TEXT,
+            loai_giao_dich TEXT,
+            danh_muc TEXT,
+            tai_khoan TEXT,
+            so_tien REAL,
+            ghi_chu TEXT
+        )
+    ''')
+    # Bảng Kế hoạch chi tiêu (Budget) theo Năm/Tháng
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS ke_hoach (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nam INTEGER,
+            thang INTEGER,
+            danh_muc TEXT,
+            han_muc REAL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ---------------------------------------------------------
+# 2. CẤU HÌNH GIAO DIỆN & MENU MỚI
+# ---------------------------------------------------------
+st.set_page_config(page_title="App Tài Chính Gia Đình", layout="wide")
+st.title("💰 Hệ Thống Quản Lý Tài Chính Gia Đình")
+
+# Danh mục cố định
+DANH_MỤC_CHI = [
+    "Ăn uống", "Chơi, du lịch", "Xăng xe", "Đồ dùng em", "Đồ dùng anh", 
+    "Đồ dùng Mint", "Nhà cửa", "Y tế", "Skincare", "Hỷ", "Hiếu", 
+    "Bảo trì nhà", "Cho đi", "Xe về ngoại", "Học Mint", "Học em"
+]
+DANH_MỤC_TIET_KIEM = ["Du lịch", "BH nhân thọ", "Chứng khoán", "Hưu sớm", "Đau ốm", "Giáo dục", "Cho mượn", "Vàng"]
+TAI_KHOAN = ["VCB EM", "BIDV EM", "ACB", "CASH EM (Tiền mặt)"]
+
+# Thanh Menu bên trái (Sidebar)
+menu = st.sidebar.radio(
+    "📌 Điều hướng", 
+    ["📝 Nhập Giao Dịch", "🎯 Kế Hoạch Chi Tiêu (1/1)", "💎 Tổng Tài Sản Tích Lũy", "📊 Báo Cáo & Lịch Sử"]
+)
+
+# ---------------------------------------------------------
+# MENU 1: NHẬP GIAO DỊCH HẰNG NGÀY
+# ---------------------------------------------------------
+if menu == "📝 Nhập Giao Dịch":
+    st.header("📝 Nhập Thu Chi / Tích Lũy Hằng Ngày")
+    with st.form(key='transaction_form', clear_on_submit=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            ngay = st.date_input("Ngày giao dịch", datetime.now())
+            nguoi = st.selectbox("Người thực hiện", ["Vợ", "Chồng"])
+            loai = st.selectbox("Loại giao dịch", ["Chi tiêu", "Thu nhập", "Tiết kiệm / Tích lũy", "Trả nợ", "Chuyển tiền Vợ <-> Chồng"])
+        with col2:
+            if loai == "Chi tiêu":
+                danh_muc = st.selectbox("Danh mục", DANH_MỤC_CHI)
+            elif loai == "Tiết kiệm / Tích lũy":
+                danh_muc = st.selectbox("Danh mục", DANH_MỤC_TIET_KIEM)
+            else:
+                danh_muc = st.text_input("Ghi rõ nguồn/nội dung", value="Lương / Thưởng")
+            tai_khoan = st.selectbox("Nguồn tiền / Tài khoản", TAI_KHOAN)
+        with col3:
+            so_tien = st.number_input("Số tiền (VNĐ)", min_value=0, step=50000, format="%d")
+            ghi_chu = st.text_area("Ghi chú")
+
+        if st.form_submit_button("➕ Lưu Giao Dịch"):
+            conn = sqlite3.connect('tai_chinh_gia_dinh.db')
+            c = conn.cursor()
+            c.execute('INSERT INTO giao_dich (ngay, nguoi_thuc_hien, loai_giao_dich, danh_muc, tai_khoan, so_tien, ghi_chu) VALUES (?,?,?,?,?,?,?)',
+                      (str(ngay), nguoi, loai, danh_muc, tai_khoan, so_tien, ghi_chu))
+            conn.commit()
+            conn.close()
+            st.success("✅ Đã lưu giao dịch!")
+
+# ---------------------------------------------------------
+# MENU 2: KẾ HOẠCH CHI TIÊU ĐỊNH KỲ (Lập ngày 1.1)
+# ---------------------------------------------------------
+elif menu == "🎯 Kế Hoạch Chi Tiêu (1/1)":
+    st.header("🎯 Kế Hoạch Ngân Sách Chi Tiêu Trong Năm")
+    st.info("💡 Bạn có thể thiết lập hạn mức chi tiêu định kỳ từng tháng tại đây vào đầu mỗi năm.")
+    
+    col1, col2 = st.columns(2)
+    nam_kh = col1.number_input("Năm kế hoạch", min_value=2024, max_value=2030, value=datetime.now().year)
+    thang_kh = col2.selectbox("Tháng", list(range(1, 13)))
+    
+    st.subheader(f"Thiết lập hạn mức cho Tháng {thang_kh}/{nam_kh}")
+    
+    with st.form("budget_form"):
+        danh_muc_kh = st.selectbox("Chọn danh mục cần đặt hạn mức", DANH_MỤC_CHI)
+        han_muc = st.number_input("Hạn mức tối đa (VNĐ)", min_value=0, step=500000, format="%d")
+        
+        if st.form_submit_button("🎯 Lưu Kế Hoạch"):
+            conn = sqlite3.connect('tai_chinh_gia_dinh.db')
+            c = conn.cursor()
+            # Xóa kế hoạch cũ nếu trùng danh mục/tháng/năm để cập nhật mới
+            c.execute('DELETE FROM ke_hoach WHERE nam=? AND thang=? AND danh_muc=?', (nam_kh, thang_kh, danh_muc_kh))
+            c.execute('INSERT INTO ke_hoach (nam, thang, danh_muc, han_muc) VALUES (?,?,?,?)', (nam_kh, thang_kh, danh_muc_kh, han_muc))
+            conn.commit()
+            conn.close()
+            st.success(f"✅ Đã đặt hạn mức {danh_muc_kh}: {han_muc:,.0f} VNĐ cho Tháng {thang_kh}/{nam_kh}")
+
+    # Hiển thị tiến độ sử dụng ngân sách
+    st.divider()
+    st.subheader("📊 So Sánh Thực Tế vs Kế Hoạch Tháng Này")
+    conn = sqlite3.connect('tai_chinh_gia_dinh.db')
+    df_kh = pd.read_sql_query("SELECT danh_muc, han_muc FROM ke_hoach WHERE nam=? AND thang=?", conn, params=(nam_kh, thang_kh))
+    df_gd = pd.read_sql_query("SELECT danh_muc, SUM(so_tien) as da_chi FROM giao_dich WHERE loai_giao_dich='Chi tiêu' GROUP BY danh_muc", conn)
+    conn.close()
+
+    if not df_kh.empty:
+        df_merge = pd.merge(df_kh, df_gd, on='danh_muc', how='left').fillna(0)
+        df_merge['Còn lại'] = df_merge['han_muc'] - df_merge['da_chi']
+        df_merge['% Đã dùng'] = (df_merge['da_chi'] / df_merge['han_muc'] * 100).round(1)
+        st.dataframe(df_merge, use_container_width=True)
+
+# ---------------------------------------------------------
+# MENU 3: QUẢN LÝ TỔNG TÀI SẢN TÍCH LŨY (TỰ ĐỘNG)
+# ---------------------------------------------------------
+elif menu == "💎 Tổng Tài Sản Tích Lũy":
+    st.header("💎 Tổng Tài Sản Tích Lũy (Tự Động Cập Nhật)")
+    st.caption("Dữ liệu được tự động tính toán từ tất cả các phiếu Thu, Chi và Tiết kiệm hằng tháng.")
+
+    conn = sqlite3.connect('tai_chinh_gia_dinh.db')
+    df_gd = pd.read_sql_query("SELECT loai_giao_dich, danh_muc, tai_khoan, so_tien FROM giao_dich", conn)
+    conn.close()
+
+    if not df_gd.empty:
+        # 1. Tính tổng tài sản theo các Hũ Tiết Kiệm/Tích Lũy
+        df_tiet_kiem = df_gd[df_gd['loai_giao_dich'] == 'Tiết kiệm / Tích lũy'].groupby('danh_muc')['so_tien'].sum().reset_index()
+        df_tiet_kiem.columns = ['Danh Mục Tích Lũy', 'Tổng Tiền Hiện Có (VNĐ)']
+
+        # 2. Tính số dư các Tài Khoản/Ví
+        thu_tk = df_gd[df_gd['loai_giao_dich'] == 'Thu nhập'].groupby('tai_khoan')['so_tien'].sum()
+        chi_tk = df_gd[df_gd['loai_giao_dich'] == 'Chi tiêu'].groupby('tai_khoan')['so_tien'].sum()
+        so_du_vi = (thu_tk.add(-chi_tk, fill_value=0)).reset_index()
+        so_du_vi.columns = ['Tài Khoản / Ví', 'Số Dư Khả Dụng (VNĐ)']
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.subheader("🏦 Số Dư Các Tài Khoản / Tiền Mặt")
+            st.dataframe(so_du_vi, use_container_width=True)
+            
+        with col_b:
+            st.subheader("📈 Các Quỹ Tích Lũy & Tiết Kiệm")
+            st.dataframe(df_tiet_kiem, use_container_width=True)
+
+        tong_tai_san = df_gd[df_gd['loai_giao_dich'] == 'Tiết kiệm / Tích lũy']['so_tien'].sum() + so_du_vi['Số Dư Khả Dụng (VNĐ)'].sum()
+        st.success(f"### 🏆 TỔNG TÀI SẢN HIỆN CÓ: {tong_tai_san:,.0f} VNĐ")
+    else:
+        st.info("Chưa có dữ liệu giao dịch nào để tính toán tổng tài sản.")
+
+# ---------------------------------------------------------
+# MENU 4: BÁO CÁO & LỊCH SỬ
+# ---------------------------------------------------------
+elif menu == "📊 Báo Cáo & Lịch Sử":
+    st.header("📊 Lịch Sử Giao Dịch")
+    conn = sqlite3.connect('tai_chinh_gia_dinh.db')
+    df = pd.read_sql_query("SELECT * FROM giao_dich ORDER BY id DESC", conn)
+    conn.close()
+    st.dataframe(df, use_container_width=True)
